@@ -586,11 +586,11 @@ class Script(scripts.Script, metaclass=(
             idx: int
         ) -> Tuple[np.ndarray, bool]:
         """ Choose input image from following sources with descending priority:
-         - p.image_control: [Deprecated] Lagacy way to pass image to controlnet.
-         - p.control_net_input_image: [Deprecated] Lagacy way to pass image to controlnet.
          - unit.image: 
            - ControlNet tab input image.
-           - Input image from API call.
+           - Input image from API call.      
+         - p.image_control: if 'reference' controlnets, legacy way to pass image to controlnet.
+         - p.control_net_input_image: [Deprecated] Lagacy way to pass image to controlnet.
          - p.init_images: A1111 img2img tab input image.
 
         Returns:
@@ -602,18 +602,8 @@ class Script(scripts.Script, metaclass=(
         p_input_image = Script.get_remote_call(p, "control_net_input_image", None, idx)
         image = image_dict_from_any(unit.image)
 
-        if batch_hijack.instance.is_batch and getattr(p, "image_control", None) is not None:
-            logger.warning("Warn: Using legacy field 'p.image_control'.")
-            input_image = HWC3(np.asarray(p.image_control))
-        elif p_input_image is not None:
-            logger.warning("Warn: Using legacy field 'p.controlnet_input_image'")
-            if isinstance(p_input_image, dict) and "mask" in p_input_image and "image" in p_input_image:
-                color = HWC3(np.asarray(p_input_image['image']))
-                alpha = np.asarray(p_input_image['mask'])[..., None]
-                input_image = np.concatenate([color, alpha], axis=2)
-            else:
-                input_image = HWC3(np.asarray(p_input_image))
-        elif image is not None:
+        if image is not None:
+            logger.info("Using unit.image as input")
             while len(image['mask'].shape) < 3:
                 image['mask'] = image['mask'][..., np.newaxis]
 
@@ -642,7 +632,19 @@ class Script(scripts.Script, metaclass=(
                     logger.info("using mask as input")
                     input_image = HWC3(image['mask'][:, :, 0])
                     unit.module = 'none'  # Always use black bg and white line
+        elif "reference" in unit.module and getattr(p, "image_control", None) is not None:
+            logger.warning("Using p.image_control as input")
+            input_image = HWC3(np.asarray(p.image_control))            
+        elif p_input_image is not None:
+            logger.warning("Warn: Using legacy field 'p.controlnet_input_image'")
+            if isinstance(p_input_image, dict) and "mask" in p_input_image and "image" in p_input_image:
+                color = HWC3(np.asarray(p_input_image['image']))
+                alpha = np.asarray(p_input_image['mask'])[..., None]
+                input_image = np.concatenate([color, alpha], axis=2)
+            else:
+                input_image = HWC3(np.asarray(p_input_image))
         else:
+            logger.info("Using original image as input")
             # use img2img init_image as default
             input_image = getattr(p, "init_images", [None])[0]
             if input_image is None:
@@ -652,7 +654,7 @@ class Script(scripts.Script, metaclass=(
 
             input_image = HWC3(np.asarray(input_image))
             image_from_a1111 = True
-        
+
         assert isinstance(input_image, np.ndarray)
         return input_image, image_from_a1111
     
